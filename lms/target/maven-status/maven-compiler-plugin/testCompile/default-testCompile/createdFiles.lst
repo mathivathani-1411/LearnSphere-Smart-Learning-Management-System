@@ -1,0 +1,4 @@
+com\lms\service\AssignmentServiceTest.class
+com\lms\service\AuthServiceTest.class
+com\lms\service\CourseServiceTest.class
+com\lms\util\ValidationUtilTest.class

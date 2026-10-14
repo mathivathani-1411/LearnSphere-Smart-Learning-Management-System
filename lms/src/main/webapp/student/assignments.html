@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Assignments – LearnHub LMS</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../css/style.css" />
+</head>
+<body>
+    <nav class="navbar">
+        <a class="navbar-brand" href="../index.html"><div class="logo-icon">🎓</div> LearnHub LMS</a>
+        <ul class="navbar-nav">
+            <li><span id="user-name" style="color:var(--text-secondary);font-size:.875rem"></span></li>
+            <li><a class="nav-link" href="notifications.html">🔔<span class="nav-badge hidden" id="notif-badge">0</span></a></li>
+            <li><button class="btn btn-secondary btn-sm" onclick="logout()">Logout</button></li>
+        </ul>
+    </nav>
+
+    <div class="app-layout">
+        <aside class="sidebar">
+            <div class="sidebar-section">
+                <div class="sidebar-label">Main</div>
+                <a class="sidebar-link" href="dashboard.html"><span class="icon">🏠</span> Dashboard</a>
+                <a class="sidebar-link" href="courses.html"><span class="icon">📚</span> Course Catalogue</a>
+                <a class="sidebar-link" href="my-courses.html"><span class="icon">🎒</span> My Courses</a>
+            </div>
+            <div class="sidebar-section">
+                <div class="sidebar-label">Learning</div>
+                <a class="sidebar-link active" href="assignments.html"><span class="icon">📝</span> Assignments</a>
+                <a class="sidebar-link" href="grades.html"><span class="icon">⭐</span> Grades</a>
+                <a class="sidebar-link" href="progress.html"><span class="icon">📊</span> My Progress</a>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <div class="section-header">
+                <div>
+                    <h1 class="page-title">My Assignments</h1>
+                    <p class="page-subtitle">View and submit your course assignments.</p>
+                </div>
+            </div>
+
+            <div id="alert-box" style="margin-bottom:1rem"></div>
+            <div id="assignments-container">
+                <div class="spinner" style="margin:3rem auto"></div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Submit Assignment Modal -->
+    <div id="submit-modal" class="modal-overlay hidden">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Submit Assignment</h3>
+                <button class="modal-close" onclick="closeSubmitModal()">✕</button>
+            </div>
+            <p style="color:var(--text-secondary);margin-bottom:1rem" id="modal-assignment-title"></p>
+
+            <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()">
+                <div class="upload-icon">📁</div>
+                <p style="color:var(--text-secondary);margin-bottom:.5rem">Click to select file</p>
+                <p class="text-xs text-muted">PDF, DOCX, DOC, ZIP, TXT — max 10 MB</p>
+                <input type="file" id="file-input" style="display:none" accept=".pdf,.docx,.doc,.zip,.txt" onchange="onFileSelect(this)" />
+            </div>
+            <div id="selected-file" class="hidden" style="margin-top:1rem;padding:.75rem;background:rgba(108,99,255,.08);border-radius:8px;font-size:.875rem;color:var(--text-primary)"></div>
+
+            <div style="display:flex;gap:.75rem;justify-content:flex-end;margin-top:1.5rem">
+                <button class="btn btn-secondary" onclick="closeSubmitModal()">Cancel</button>
+                <button class="btn btn-primary" id="confirm-submit-btn" onclick="submitAssignment()" disabled>Submit</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="../js/app.js"></script>
+    <script>
+        if (!Auth.requireAuth('STUDENT')) throw new Error();
+        document.getElementById('user-name').textContent = '👤 ' + Auth.getUser().name;
+
+        let pendingAssignmentId = null;
+        let selectedFile = null;
+
+        // Setup drag-and-drop
+        const zone = document.getElementById('upload-zone');
+        zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+        zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+        zone.addEventListener('drop', e => {
+            e.preventDefault(); zone.classList.remove('drag-over');
+            const f = e.dataTransfer.files[0];
+            if (f) setFile(f);
+        });
+
+        function onFileSelect(input) {
+            if (input.files[0]) setFile(input.files[0]);
+        }
+
+        function setFile(f) {
+            const allowed = ['pdf','docx','doc','zip','txt'];
+            const ext = f.name.split('.').pop().toLowerCase();
+            if (!allowed.includes(ext)) { UI.toast('File type not allowed', 'danger'); return; }
+            if (f.size > 10 * 1024 * 1024) { UI.toast('File too large (max 10 MB)', 'danger'); return; }
+            selectedFile = f;
+            const info = document.getElementById('selected-file');
+            info.textContent = `📎 ${f.name}  (${(f.size / 1024).toFixed(0)} KB)`;
+            info.classList.remove('hidden');
+            document.getElementById('confirm-submit-btn').disabled = false;
+        }
+
+        async function loadAssignments() {
+            try {
+                const [assignments, submissions] = await Promise.all([
+                    API.get('/api/assignments/me'),
+                    API.get('/api/submissions/me')
+                ]);
+                const submissionsMap = {};
+                (submissions || []).forEach(s => { submissionsMap[s.assignmentId] = s; });
+                renderAssignments(assignments, submissionsMap);
+            } catch (err) {
+                document.getElementById('assignments-container').innerHTML =
+                    UI.emptyState('😕', 'Failed to load assignments', err.message);
+            }
+        }
+
+        function renderAssignments(assignments, submissionsMap) {
+            if (assignments.length === 0) {
+                document.getElementById('assignments-container').innerHTML =
+                    UI.emptyState('🎉', 'No assignments yet!', 'Enroll in courses to see assignments here.');
+                return;
+            }
+
+            const pending  = assignments.filter(a => !UI.isPastDeadline(a.deadline));
+            const past     = assignments.filter(a =>  UI.isPastDeadline(a.deadline));
+
+            let html = '';
+
+            if (pending.length > 0) {
+                html += `<h3 style="margin-bottom:1rem">📋 Upcoming (${pending.length})</h3>`;
+                html += renderAssignmentTable(pending, false, submissionsMap);
+            }
+
+            if (past.length > 0) {
+                html += `<h3 style="margin:2rem 0 1rem">⏰ Past Deadline (${past.length})</h3>`;
+                html += renderAssignmentTable(past, true, submissionsMap);
+            }
+
+            document.getElementById('assignments-container').innerHTML = html;
+        }
+
+        function renderAssignmentTable(list, isPast, submissionsMap) {
+            return `
+                <div class="table-container" style="margin-bottom:1.5rem">
+                    <table>
+                        <thead><tr>
+                            <th>Title</th><th>Course</th><th>Deadline</th>
+                            <th>Max Marks</th><th>Status</th><th>Action</th>
+                        </tr></thead>
+                        <tbody>
+                            ${list.map(a => {
+                                const sub = submissionsMap ? submissionsMap[a.assignmentId] : null;
+                                let statusHtml = '<span class="text-muted">Not Submitted</span>';
+                                if (sub) {
+                                    const badgeClass = sub.status === 'GRADED' ? 'badge-success' : sub.status === 'LATE' ? 'badge-warning' : 'badge-accent';
+                                    statusHtml = `<span class="badge ${badgeClass}">${sub.status}</span>`;
+                                    if (sub.score != null) {
+                                        statusHtml += `<div class="text-xs" style="color:var(--text-secondary);margin-top:2px">Score: ${sub.score} / ${a.maxMarks}</div>`;
+                                    }
+                                }
+
+                                let actionHtml = '';
+                                if (sub) {
+                                    actionHtml = `<a href="/lms/api/submissions/${sub.submissionId}/download" class="btn btn-secondary btn-sm" download>⬇ Download File</a>`;
+                                } else if (!isPast) {
+                                    actionHtml = `<button class="btn btn-primary btn-sm" onclick="openSubmitModal(${a.assignmentId},'${a.title.replace(/'/g,"\\'")}')">Upload</button>`;
+                                } else if (a.allowLate) {
+                                    actionHtml = `<button class="btn btn-warning btn-sm" onclick="openSubmitModal(${a.assignmentId},'${a.title.replace(/'/g,"\\'")}')">Late Submit</button>`;
+                                } else {
+                                    actionHtml = UI.badge('CLOSED','muted');
+                                }
+
+                                return `
+                                    <tr>
+                                        <td style="color:var(--text-primary);font-weight:600">${a.title}</td>
+                                        <td>${a.courseTitle}</td>
+                                        <td>${UI.formatDateTime(a.deadline)}
+                                            ${isPast ? '<br/>' + UI.badge('PAST','danger') : ''}</td>
+                                        <td>${a.maxMarks}</td>
+                                        <td>${statusHtml}</td>
+                                        <td>${actionHtml}</td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        function openSubmitModal(assignmentId, title) {
+            pendingAssignmentId = assignmentId;
+            selectedFile = null;
+            document.getElementById('modal-assignment-title').textContent = `Submitting for: ${title}`;
+            document.getElementById('selected-file').classList.add('hidden');
+            document.getElementById('file-input').value = '';
+            document.getElementById('confirm-submit-btn').disabled = true;
+            document.getElementById('submit-modal').classList.remove('hidden');
+        }
+
+        function closeSubmitModal() {
+            document.getElementById('submit-modal').classList.add('hidden');
+            pendingAssignmentId = null;
+        }
+
+        async function submitAssignment() {
+            if (!selectedFile || !pendingAssignmentId) return;
+            const btn = document.getElementById('confirm-submit-btn');
+            UI.setButtonLoading(btn, true);
+            try {
+                const form = new FormData();
+                form.append('file', selectedFile);
+                await API.upload(`/api/assignments/${pendingAssignmentId}/submissions`, form);
+                closeSubmitModal();
+                UI.toast('Assignment submitted successfully! ✅', 'success');
+                loadAssignments();
+            } catch (err) {
+                UI.showAlert('alert-box', err.message, 'danger');
+                closeSubmitModal();
+            } finally {
+                UI.setButtonLoading(btn, false);
+            }
+        }
+
+        loadAssignments();
+        loadNotificationCount();
+    </script>
+</body>
+</html>

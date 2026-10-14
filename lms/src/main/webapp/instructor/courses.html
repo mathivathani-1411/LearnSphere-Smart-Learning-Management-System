@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Manage Courses – LearnHub LMS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../css/style.css" />
+    <style>
+        .curriculum-module {
+            background: rgba(255,255,255,0.02);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-sm);
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+        .curriculum-lesson-item {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: .5rem .75rem; background: rgba(255,255,255,0.03);
+            border-radius: 6px; margin-top: .5rem; font-size: .88rem;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <a class="navbar-brand" href="../index.html"><div class="logo-icon">👩‍🏫</div> LearnHub LMS</a>
+        <ul class="navbar-nav">
+            <li><span id="user-name" style="color:var(--text-secondary);font-size:.875rem"></span></li>
+            <li><a class="nav-link" href="notifications.html">🔔 <span class="nav-badge hidden" id="notif-badge">0</span></a></li>
+            <li><button class="btn btn-secondary btn-sm" onclick="logout()">Logout</button></li>
+        </ul>
+    </nav>
+
+    <div class="app-layout">
+        <aside class="sidebar">
+            <div class="sidebar-section">
+                <div class="sidebar-label">Instructor Portal</div>
+                <a class="sidebar-link" href="dashboard.html"><span class="icon">🏠</span> Dashboard</a>
+                <a class="sidebar-link active" href="courses.html"><span class="icon">📚</span> Manage Courses</a>
+                <a class="sidebar-link" href="assignments.html"><span class="icon">📝</span> Assignments</a>
+                <a class="sidebar-link" href="submissions.html"><span class="icon">⭐</span> Grade Submissions</a>
+            </div>
+            <div class="sidebar-section">
+                <div class="sidebar-label">Account</div>
+                <a class="sidebar-link" href="notifications.html"><span class="icon">🔔</span> Notifications</a>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <div class="section-header">
+                <div>
+                    <h1 class="page-title">Manage Courses</h1>
+                    <p class="page-subtitle">Create, publish, edit courses, and author lesson curricula.</p>
+                </div>
+                <button class="btn btn-primary" onclick="openCreateCourseModal()">+ Create New Course</button>
+            </div>
+
+            <div id="alert-box"></div>
+            <div id="courses-list" class="card-grid">
+                <div class="spinner" style="margin:3rem auto;grid-column:1/-1"></div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Create / Edit Course Modal -->
+    <div id="course-modal" class="modal-overlay hidden">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="course-modal-title">Create Course</h3>
+                <button class="modal-close" onclick="closeCourseModal()">✕</button>
+            </div>
+            <form id="course-form" onsubmit="handleSaveCourse(event)">
+                <input type="hidden" id="course-id" />
+                <div class="form-group">
+                    <label class="form-label" for="course-title-input">Course Title</label>
+                    <input id="course-title-input" class="form-control" placeholder="e.g. Full-Stack Java Engineering" required />
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="course-desc-input">Description</label>
+                    <textarea id="course-desc-input" class="form-control" rows="3" placeholder="Outline the learning objectives and prerequisites..." required></textarea>
+                </div>
+                <div class="form-group" id="status-group">
+                    <label class="form-label" for="course-status-select">Status</label>
+                    <select id="course-status-select" class="form-control">
+                        <option value="DRAFT">DRAFT (Unpublished)</option>
+                        <option value="PUBLISHED">PUBLISHED (Visible to Students)</option>
+                        <option value="ARCHIVED">ARCHIVED</option>
+                    </select>
+                </div>
+                <div style="display:flex;gap:.75rem;justify-content:flex-end;margin-top:1.5rem">
+                    <button type="button" class="btn btn-secondary" onclick="closeCourseModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="save-course-btn">Save Course</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Curriculum Modal (Modules & Lessons) -->
+    <div id="curriculum-modal" class="modal-overlay hidden">
+        <div class="modal" style="max-width:680px;max-height:85vh;overflow-y:auto">
+            <div class="modal-header">
+                <h3 id="curriculum-modal-title">Curriculum Structure</h3>
+                <button class="modal-close" onclick="closeCurriculumModal()">✕</button>
+            </div>
+
+            <!-- Add Module Section -->
+            <div style="display:flex;gap:.5rem;margin-bottom:1.5rem">
+                <input type="text" id="new-module-title" class="form-control" placeholder="New module name (e.g. Module 1: Introduction)" />
+                <button class="btn btn-primary" style="white-space:nowrap" onclick="handleAddModule()">+ Add Module</button>
+            </div>
+
+            <!-- Modules list with lessons -->
+            <div id="curriculum-tree">
+                <div class="spinner" style="margin:2rem auto"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Lesson Modal -->
+    <div id="lesson-modal" class="modal-overlay hidden">
+        <div class="modal" style="max-width:550px">
+            <div class="modal-header">
+                <h3>Add Lesson</h3>
+                <button class="modal-close" onclick="closeLessonModal()">✕</button>
+            </div>
+            <form onsubmit="handleSaveLesson(event)">
+                <input type="hidden" id="lesson-module-id" />
+                <div class="form-group">
+                    <label class="form-label">Lesson Title</label>
+                    <input id="lesson-title" class="form-control" placeholder="e.g. Getting Started with Servlets" required />
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Content Type</label>
+                    <select id="lesson-type" class="form-control">
+                        <option value="TEXT">Text / Markdown</option>
+                        <option value="VIDEO">Video Link</option>
+                        <option value="PDF">PDF Reference</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Lesson Text / Body</label>
+                    <textarea id="lesson-content" class="form-control" rows="4" placeholder="Enter lesson notes, explanation, or code samples..."></textarea>
+                </div>
+                <div style="display:flex;gap:.75rem;justify-content:flex-end">
+                    <button type="button" class="btn btn-secondary" onclick="closeLessonModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="save-lesson-btn">Add Lesson</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="../js/app.js"></script>
+    <script>
+        if (!Auth.requireAuth('INSTRUCTOR')) throw new Error();
+        document.getElementById('user-name').textContent = '👩‍🏫 ' + Auth.getUser().name;
+
+        let activeCurriculumCourseId = null;
+
+        async function loadCourses() {
+            try {
+                const courses = await API.get('/api/courses/instructor');
+                const list = document.getElementById('courses-list');
+
+                if (courses.length === 0) {
+                    list.innerHTML = UI.emptyState('📚', 'No courses authored', 'Click "Create New Course" above to launch your first course.');
+                    return;
+                }
+
+                list.innerHTML = courses.map(c => `
+                    <div class="card" style="display:flex;flex-direction:column;justify-content:space-between">
+                        <div>
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
+                                <span class="badge ${c.status === 'PUBLISHED' ? 'badge-success' : c.status === 'ARCHIVED' ? 'badge-muted' : 'badge-warning'}">
+                                    ${c.status}
+                                </span>
+                                <span class="text-xs text-muted">${UI.formatDate(c.createdAt)}</span>
+                            </div>
+                            <h3 style="color:var(--text-primary);margin-bottom:.5rem">${c.title}</h3>
+                            <p style="font-size:.85rem;color:var(--text-secondary);margin-bottom:1.25rem;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden">
+                                ${c.description || 'No description provided.'}
+                            </p>
+                        </div>
+
+                        <div>
+                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-bottom:.5rem">
+                                <button class="btn btn-secondary btn-sm" onclick="openCurriculumModal(${c.courseId},'${c.title.replace(/'/g,"\\'")}')">
+                                    📑 Syllabus
+                                </button>
+                                <button class="btn btn-secondary btn-sm" onclick="openEditCourseModal(${c.courseId},'${c.title.replace(/'/g,"\\'")}','${(c.description||'').replace(/'/g,"\\'")}','${c.status}')">
+                                    ✏ Edit
+                                </button>
+                            </div>
+                            <button class="btn btn-danger btn-sm btn-full" onclick="deleteCourse(${c.courseId},'${c.title.replace(/'/g,"\\'")}')">
+                                🗑 Delete Course
+                            </button>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (err) {
+                document.getElementById('courses-list').innerHTML =
+                    UI.emptyState('😕', 'Failed to load courses', err.message);
+            }
+        }
+
+        // Course Modal Handlers
+        function openCreateCourseModal() {
+            document.getElementById('course-modal-title').textContent = 'Create Course';
+            document.getElementById('course-id').value = '';
+            document.getElementById('course-title-input').value = '';
+            document.getElementById('course-desc-input').value = '';
+            document.getElementById('status-group').style.display = 'none';
+            document.getElementById('course-modal').classList.remove('hidden');
+        }
+
+        function openEditCourseModal(id, title, desc, status) {
+            document.getElementById('course-modal-title').textContent = 'Edit Course';
+            document.getElementById('course-id').value = id;
+            document.getElementById('course-title-input').value = title;
+            document.getElementById('course-desc-input').value = desc;
+            document.getElementById('status-group').style.display = 'block';
+            document.getElementById('course-status-select').value = status;
+            document.getElementById('course-modal').classList.remove('hidden');
+        }
+
+        function closeCourseModal() {
+            document.getElementById('course-modal').classList.add('hidden');
+        }
+
+        async function handleSaveCourse(e) {
+            e.preventDefault();
+            const id = document.getElementById('course-id').value;
+            const title = document.getElementById('course-title-input').value.trim();
+            const description = document.getElementById('course-desc-input').value.trim();
+            const status = document.getElementById('course-status-select').value;
+            const btn = document.getElementById('save-course-btn');
+
+            UI.setButtonLoading(btn, true);
+            try {
+                if (id) {
+                    await API.put(`/api/courses/${id}`, { title, description, status });
+                    UI.toast('Course updated!', 'success');
+                } else {
+                    await API.post('/api/courses', { title, description });
+                    UI.toast('Course created in DRAFT mode!', 'success');
+                }
+                closeCourseModal();
+                loadCourses();
+            } catch (err) {
+                UI.toast(err.message, 'danger');
+            } finally {
+                UI.setButtonLoading(btn, false);
+            }
+        }
+
+        async function deleteCourse(id, title) {
+            if (!confirm(`Are you sure you want to delete course "${title}"? This will delete all modules and lessons.`)) return;
+            try {
+                await API.delete(`/api/courses/${id}`);
+                UI.toast('Course deleted', 'success');
+                loadCourses();
+            } catch (err) {
+                UI.toast(err.message, 'danger');
+            }
+        }
+
+        // Curriculum Modal
+        async function openCurriculumModal(courseId, title) {
+            activeCurriculumCourseId = courseId;
+            document.getElementById('curriculum-modal-title').textContent = `Curriculum: ${title}`;
+            document.getElementById('curriculum-modal').classList.remove('hidden');
+            loadCurriculum();
+        }
+
+        function closeCurriculumModal() {
+            document.getElementById('curriculum-modal').classList.add('hidden');
+            activeCurriculumCourseId = null;
+        }
+
+        async function loadCurriculum() {
+            const tree = document.getElementById('curriculum-tree');
+            tree.innerHTML = '<div class="spinner" style="margin:2rem auto"></div>';
+            try {
+                const [modules, lessons] = await Promise.all([
+                    API.get(`/api/courses/${activeCurriculumCourseId}/modules`),
+                    API.get(`/api/courses/${activeCurriculumCourseId}/lessons`)
+                ]);
+
+                if (modules.length === 0) {
+                    tree.innerHTML = '<p class="text-muted text-sm" style="text-align:center;padding:1.5rem">No modules yet. Add your first module using the field above!</p>';
+                    return;
+                }
+
+                tree.innerHTML = modules.map(m => {
+                    const modLessons = lessons.filter(l => l.moduleId === m.moduleId);
+                    return `
+                        <div class="curriculum-module">
+                            <div style="display:flex;justify-content:space-between;align-items:center">
+                                <strong style="color:var(--text-primary)">📁 ${m.title}</strong>
+                                <div style="display:flex;gap:.5rem">
+                                    <button class="btn btn-secondary btn-sm" onclick="openAddLessonModal(${m.moduleId})">+ Add Lesson</button>
+                                    <button class="btn btn-danger btn-sm" onclick="deleteModule(${m.moduleId})">✕</button>
+                                </div>
+                            </div>
+
+                            <div style="margin-top:.75rem">
+                                ${modLessons.length === 0 ? '<span class="text-xs text-muted">No lessons in this module</span>' : ''}
+                                ${modLessons.map(l => `
+                                    <div class="curriculum-lesson-item">
+                                        <span>📄 ${l.title} <span class="badge badge-accent" style="font-size:.65rem;margin-left:.3rem">${l.contentType}</span></span>
+                                        <button class="btn btn-danger btn-sm" style="padding:.2rem .45rem;font-size:.7rem" onclick="deleteLesson(${l.lessonId})">✕</button>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (err) {
+                tree.innerHTML = `<p class="alert alert-danger">${err.message}</p>`;
+            }
+        }
+
+        async function handleAddModule() {
+            const input = document.getElementById('new-module-title');
+            const title = input.value.trim();
+            if (!title) return;
+            try {
+                await API.post(`/api/courses/${activeCurriculumCourseId}/modules`, { title, displayOrder: 1 });
+                input.value = '';
+                loadCurriculum();
+                UI.toast('Module created!', 'success');
+            } catch (err) {
+                UI.toast(err.message, 'danger');
+            }
+        }
+
+        async function deleteModule(modId) {
+            if (!confirm('Delete module and all its lessons?')) return;
+            try {
+                await API.delete(`/api/modules/${modId}`);
+                loadCurriculum();
+                UI.toast('Module deleted', 'success');
+            } catch (err) {
+                UI.toast(err.message, 'danger');
+            }
+        }
+
+        // Lesson Modal
+        function openAddLessonModal(moduleId) {
+            document.getElementById('lesson-module-id').value = moduleId;
+            document.getElementById('lesson-title').value = '';
+            document.getElementById('lesson-content').value = '';
+            document.getElementById('lesson-modal').classList.remove('hidden');
+        }
+
+        function closeLessonModal() {
+            document.getElementById('lesson-modal').classList.add('hidden');
+        }
+
+        async function handleSaveLesson(e) {
+            e.preventDefault();
+            const moduleId = document.getElementById('lesson-module-id').value;
+            const title = document.getElementById('lesson-title').value.trim();
+            const contentType = document.getElementById('lesson-type').value;
+            const content = document.getElementById('lesson-content').value.trim();
+            const btn = document.getElementById('save-lesson-btn');
+
+            UI.setButtonLoading(btn, true);
+            try {
+                await API.post(`/api/modules/${moduleId}/lessons`, { title, contentType, content, displayOrder: 1 });
+                closeLessonModal();
+                loadCurriculum();
+                UI.toast('Lesson added successfully!', 'success');
+            } catch (err) {
+                UI.toast(err.message, 'danger');
+            } finally {
+                UI.setButtonLoading(btn, false);
+            }
+        }
+
+        async function deleteLesson(lessonId) {
+            if (!confirm('Delete this lesson?')) return;
+            try {
+                await API.delete(`/api/lessons/${lessonId}`);
+                loadCurriculum();
+                UI.toast('Lesson deleted', 'success');
+            } catch (err) {
+                UI.toast(err.message, 'danger');
+            }
+        }
+
+        loadCourses();
+        loadNotificationCount();
+    </script>
+</body>
+</html>

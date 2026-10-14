@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Grade Submissions – LearnHub LMS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../css/style.css" />
+</head>
+<body>
+    <nav class="navbar">
+        <a class="navbar-brand" href="../index.html"><div class="logo-icon">👩‍🏫</div> LearnHub LMS</a>
+        <ul class="navbar-nav">
+            <li><span id="user-name" style="color:var(--text-secondary);font-size:.875rem"></span></li>
+            <li><a class="nav-link" href="notifications.html">🔔 <span class="nav-badge hidden" id="notif-badge">0</span></a></li>
+            <li><button class="btn btn-secondary btn-sm" onclick="logout()">Logout</button></li>
+        </ul>
+    </nav>
+
+    <div class="app-layout">
+        <aside class="sidebar">
+            <div class="sidebar-section">
+                <div class="sidebar-label">Instructor Portal</div>
+                <a class="sidebar-link" href="dashboard.html"><span class="icon">🏠</span> Dashboard</a>
+                <a class="sidebar-link" href="courses.html"><span class="icon">📚</span> Manage Courses</a>
+                <a class="sidebar-link" href="assignments.html"><span class="icon">📝</span> Assignments</a>
+                <a class="sidebar-link active" href="submissions.html"><span class="icon">⭐</span> Grade Submissions</a>
+            </div>
+            <div class="sidebar-section">
+                <div class="sidebar-label">Account</div>
+                <a class="sidebar-link" href="notifications.html"><span class="icon">🔔</span> Notifications</a>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <div class="section-header">
+                <div>
+                    <h1 class="page-title">Grade Submissions</h1>
+                    <p class="page-subtitle">Review student uploaded files, assign marks, and provide constructive feedback.</p>
+                </div>
+            </div>
+
+            <!-- Assignment Selector Filter -->
+            <div class="form-group" style="max-width:400px;margin-bottom:1.5rem">
+                <label class="form-label">Select Assignment to Grade</label>
+                <select id="asg-filter-select" class="form-control" onchange="onAssignmentSelected(this.value)">
+                    <option value="">-- Choose Assignment --</option>
+                </select>
+            </div>
+
+            <div id="alert-box"></div>
+            <div id="submissions-container">
+                <p class="text-muted" style="text-align:center;padding:2rem">Please select an assignment above to view student submissions.</p>
+            </div>
+        </main>
+    </div>
+
+    <!-- Grade Modal -->
+    <div id="grade-modal" class="modal-overlay hidden">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="grade-modal-title">Grade Submission</h3>
+                <button class="modal-close" onclick="closeGradeModal()">✕</button>
+            </div>
+            <form onsubmit="handleSaveGrade(event)">
+                <input type="hidden" id="grade-sub-id" />
+                <div class="form-group">
+                    <label class="form-label">Score (Max: <span id="max-marks-display">100</span>)</label>
+                    <input type="number" step="0.5" id="grade-score" class="form-control" min="0" required />
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Instructor Feedback</label>
+                    <textarea id="grade-feedback" class="form-control" rows="4" placeholder="Good work! Well-structured code and proper documentation..."></textarea>
+                </div>
+                <div style="display:flex;gap:.75rem;justify-content:flex-end;margin-top:1.5rem">
+                    <button type="button" class="btn btn-secondary" onclick="closeGradeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="save-grade-btn">Submit Grade</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="../js/app.js"></script>
+    <script>
+        if (!Auth.requireAuth('INSTRUCTOR')) throw new Error();
+        document.getElementById('user-name').textContent = '👩‍🏫 ' + Auth.getUser().name;
+
+        let activeAssignment = null;
+        let currentSubmissions = [];
+
+        async function init() {
+            try {
+                const courses = await API.get('/api/courses/instructor');
+                const select = document.getElementById('asg-filter-select');
+
+                let allAssignments = [];
+                for (const c of courses) {
+                    try {
+                        const asgs = await API.get(`/api/courses/${c.courseId}/assignments`);
+                        allAssignments.push(...asgs.map(a => ({ ...a, courseTitle: c.title })));
+                    } catch (_) {}
+                }
+
+                select.innerHTML = '<option value="">-- Choose Assignment --</option>' +
+                    allAssignments.map(a => `<option value="${a.assignmentId}">${a.title} (${a.courseTitle})</option>`).join('');
+
+                // Check URL param if navigated from assignments page
+                const urlParams = new URLSearchParams(window.location.search);
+                const asgIdParam = urlParams.get('asgId');
+                if (asgIdParam) {
+                    select.value = asgIdParam;
+                    onAssignmentSelected(asgIdParam);
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function onAssignmentSelected(asgId) {
+            if (!asgId) {
+                document.getElementById('submissions-container').innerHTML =
+                    '<p class="text-muted" style="text-align:center;padding:2rem">Please select an assignment above to view student submissions.</p>';
+                return;
+            }
+
+            const container = document.getElementById('submissions-container');
+            container.innerHTML = '<div class="spinner" style="margin:3rem auto"></div>';
+
+            try {
+                // Fetch assignment details and its submissions
+                const [asg, subs] = await Promise.all([
+                    API.get(`/api/assignments/${asgId}`),
+                    API.get(`/api/assignments/${asgId}/submissions`)
+                ]);
+                activeAssignment = asg;
+                currentSubmissions = subs;
+
+                if (subs.length === 0) {
+                    container.innerHTML = UI.emptyState('📄', 'No submissions yet', 'Students have not submitted files for this assignment.');
+                    return;
+                }
+
+                container.innerHTML = `
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Student ID</th>
+                                    <th>Submitted File</th>
+                                    <th>Submitted Date</th>
+                                    <th>Status</th>
+                                    <th>Score</th>
+                                    <th>Feedback</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${subs.map(s => {
+                                    const g = s.grade;
+                                    return `
+                                        <tr>
+                                            <td style="color:var(--text-primary);font-weight:600">Student #${s.studentId}</td>
+                                            <td>
+                                                <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+                                                    <span style="color:var(--accent-light);font-weight:500">📁 ${s.originalName || 'submission.pdf'}</span>
+                                                    <a href="/lms/api/submissions/${s.submissionId}/download" class="btn btn-secondary btn-sm" style="padding:.2rem .55rem;font-size:.75rem" download>⬇ Download</a>
+                                                </div>
+                                            </td>
+                                            <td class="text-xs text-muted">${UI.formatDateTime(s.submittedAt)}</td>
+                                            <td>
+                                                ${s.status === 'LATE'
+                                                    ? '<span class="badge badge-warning">LATE</span>'
+                                                    : s.status === 'GRADED'
+                                                        ? '<span class="badge badge-success">GRADED</span>'
+                                                        : '<span class="badge badge-accent">SUBMITTED</span>'
+                                                }
+                                            </td>
+                                            <td>
+                                                ${g != null
+                                                    ? `<strong style="color:var(--text-primary)">${g.score}</strong> / ${asg.maxMarks}`
+                                                    : '<span class="text-muted">—</span>'
+                                                }
+                                            </td>
+                                            <td style="max-width:240px;font-size:.85rem;color:var(--text-secondary)">
+                                                ${g && g.feedback ? g.feedback : '<span class="text-muted">None</span>'}
+                                            </td>
+                                            <td>
+                                                <button class="btn btn-primary btn-sm" onclick="openGradeModal(${s.submissionId})">
+                                                    ${g != null ? 'Re-Grade' : 'Grade'}
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    `;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+            } catch (err) {
+                container.innerHTML = `<p class="alert alert-danger">${err.message}</p>`;
+            }
+        }
+
+        function openGradeModal(submissionId) {
+            const sub = currentSubmissions.find(s => s.submissionId === submissionId);
+            if (!sub) return;
+
+            document.getElementById('grade-sub-id').value = submissionId;
+            document.getElementById('max-marks-display').textContent = activeAssignment ? activeAssignment.maxMarks : '100';
+            document.getElementById('grade-score').max = activeAssignment ? activeAssignment.maxMarks : 100;
+            document.getElementById('grade-score').value = sub.grade ? sub.grade.score : '';
+            document.getElementById('grade-feedback').value = sub.grade ? sub.grade.feedback : '';
+            document.getElementById('grade-modal').classList.remove('hidden');
+        }
+
+        function closeGradeModal() {
+            document.getElementById('grade-modal').classList.add('hidden');
+        }
+
+        async function handleSaveGrade(e) {
+            e.preventDefault();
+            const subId = document.getElementById('grade-sub-id').value;
+            const score = parseFloat(document.getElementById('grade-score').value);
+            const feedback = document.getElementById('grade-feedback').value.trim();
+            const btn = document.getElementById('save-grade-btn');
+
+            UI.setButtonLoading(btn, true);
+            try {
+                await API.put(`/api/submissions/${subId}/grade`, { score, feedback });
+                UI.toast('Grade recorded & student notified! ⭐', 'success');
+                closeGradeModal();
+                onAssignmentSelected(activeAssignment.assignmentId);
+            } catch (err) {
+                UI.toast(err.message, 'danger');
+            } finally {
+                UI.setButtonLoading(btn, false);
+            }
+        }
+
+        init();
+        loadNotificationCount();
+    </script>
+</body>
+</html>

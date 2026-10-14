@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My Courses – LearnHub LMS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../css/style.css" />
+</head>
+<body>
+    <nav class="navbar">
+        <a class="navbar-brand" href="../index.html"><div class="logo-icon">🎓</div> LearnHub LMS</a>
+        <ul class="navbar-nav">
+            <li><span id="user-name" style="color:var(--text-secondary);font-size:.875rem"></span></li>
+            <li><a class="nav-link" href="notifications.html">🔔 <span class="nav-badge hidden" id="notif-badge">0</span></a></li>
+            <li><button class="btn btn-secondary btn-sm" onclick="logout()">Logout</button></li>
+        </ul>
+    </nav>
+
+    <div class="app-layout">
+        <aside class="sidebar">
+            <div class="sidebar-section">
+                <div class="sidebar-label">Main</div>
+                <a class="sidebar-link" href="dashboard.html"><span class="icon">🏠</span> Dashboard</a>
+                <a class="sidebar-link" href="courses.html"><span class="icon">📚</span> Course Catalogue</a>
+                <a class="sidebar-link active" href="my-courses.html"><span class="icon">🎒</span> My Courses</a>
+            </div>
+            <div class="sidebar-section">
+                <div class="sidebar-label">Learning</div>
+                <a class="sidebar-link" href="assignments.html"><span class="icon">📝</span> Assignments</a>
+                <a class="sidebar-link" href="grades.html"><span class="icon">⭐</span> Grades</a>
+                <a class="sidebar-link" href="progress.html"><span class="icon">📊</span> My Progress</a>
+            </div>
+            <div class="sidebar-section">
+                <div class="sidebar-label">Account</div>
+                <a class="sidebar-link" href="notifications.html"><span class="icon">🔔</span> Notifications</a>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <div class="section-header">
+                <div>
+                    <h1 class="page-title">My Enrolled Courses</h1>
+                    <p class="page-subtitle">Pick up right where you left off.</p>
+                </div>
+                <a href="courses.html" class="btn btn-primary">+ Browse More Courses</a>
+            </div>
+
+            <div id="enrolled-container" class="card-grid">
+                <div class="spinner" style="margin:3rem auto;grid-column:1/-1"></div>
+            </div>
+        </main>
+    </div>
+
+    <script src="../js/app.js"></script>
+    <script>
+        if (!Auth.requireAuth('STUDENT')) throw new Error();
+        document.getElementById('user-name').textContent = '👤 ' + Auth.getUser().name;
+
+        async function loadMyCourses() {
+            try {
+                const [enrollments, progressList] = await Promise.all([
+                    API.get('/api/enrollments/me'),
+                    API.get('/api/progress/me')
+                ]);
+
+                const progressMap = {};
+                progressList.forEach(p => { progressMap[p.courseId] = p; });
+
+                const container = document.getElementById('enrolled-container');
+                if (enrollments.length === 0) {
+                    container.innerHTML = UI.emptyState('🎒', 'No enrolled courses yet', 'Explore our course catalogue to start learning!');
+                    return;
+                }
+
+                container.innerHTML = enrollments.map((e, idx) => {
+                    const prog = progressMap[e.courseId] || { percentage: 0, completedLessons: 0, totalLessons: 0 };
+                    const isDone = prog.percentage >= 100;
+                    return `
+                        <div class="card" style="display:flex;flex-direction:column;justify-content:space-between">
+                            <div>
+                                <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:.75rem">
+                                    <span class="badge ${isDone ? 'badge-success' : 'badge-accent'}">
+                                        ${isDone ? 'Completed' : 'In Progress'}
+                                    </span>
+                                    <span class="text-xs text-muted">Enrolled ${UI.formatDate(e.enrollmentDate)}</span>
+                                </div>
+                                <h3 style="color:var(--text-primary);margin-bottom:.5rem;font-size:1.1rem">${e.courseTitle}</h3>
+                                <p style="font-size:.85rem;color:var(--text-secondary);margin-bottom:1.25rem">
+                                    ${prog.completedLessons} of ${prog.totalLessons} lessons completed
+                                </p>
+                            </div>
+
+                            <div>
+                                <div style="margin-bottom:1rem">
+                                    ${UI.progressBar(prog.percentage)}
+                                </div>
+                                <a href="learn.html?courseId=${e.courseId}" class="btn btn-primary btn-full">
+                                    ▶ Continue Learning
+                                </a>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (err) {
+                document.getElementById('enrolled-container').innerHTML =
+                    UI.emptyState('😕', 'Failed to load enrolled courses', err.message);
+            }
+        }
+
+        loadMyCourses();
+        loadNotificationCount();
+    </script>
+</body>
+</html>

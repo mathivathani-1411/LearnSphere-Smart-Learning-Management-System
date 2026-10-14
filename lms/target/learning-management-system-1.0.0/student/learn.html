@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Learn Course – LearnHub LMS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../css/style.css" />
+    <style>
+        .learn-layout {
+            display: grid;
+            grid-template-columns: 340px 1fr;
+            min-height: calc(100vh - 64px);
+        }
+        .syllabus-sidebar {
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--glass-border);
+            padding: 1.5rem 1rem;
+            overflow-y: auto;
+            max-height: calc(100vh - 64px);
+        }
+        .lesson-viewer {
+            padding: 2.5rem;
+            overflow-y: auto;
+            max-height: calc(100vh - 64px);
+        }
+        .lesson-nav-item {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: .65rem .85rem; border-radius: var(--radius-sm);
+            margin-bottom: .25rem; cursor: pointer;
+            transition: all var(--transition);
+            font-size: .88rem; color: var(--text-secondary);
+        }
+        .lesson-nav-item:hover {
+            background: var(--bg-card-hover); color: var(--text-primary);
+        }
+        .lesson-nav-item.active {
+            background: rgba(108,99,255,0.18);
+            border: 1px solid rgba(108,99,255,0.3);
+            color: var(--accent-light); font-weight: 600;
+        }
+        .module-header {
+            font-size: .82rem; font-weight: 700;
+            text-transform: uppercase; letter-spacing: .05em;
+            color: var(--text-muted); padding: .75rem .85rem .35rem;
+        }
+        .content-box {
+            background: var(--bg-card);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-md);
+            padding: 2rem;
+            line-height: 1.8;
+            font-size: 1rem;
+            margin-bottom: 2rem;
+        }
+        @media(max-width: 860px) {
+            .learn-layout { grid-template-columns: 1fr; }
+            .syllabus-sidebar { max-height: 300px; }
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div style="display:flex;align-items:center;gap:1rem">
+            <a href="my-courses.html" class="btn btn-secondary btn-sm">← Back to Courses</a>
+            <span id="course-title-nav" style="font-weight:700;font-size:1.05rem;color:var(--text-primary)">Loading Course…</span>
+        </div>
+        <ul class="navbar-nav">
+            <li><span id="user-name" style="color:var(--text-secondary);font-size:.875rem"></span></li>
+            <li><button class="btn btn-secondary btn-sm" onclick="logout()">Logout</button></li>
+        </ul>
+    </nav>
+
+    <div class="learn-layout">
+        <!-- Syllabus Sidebar -->
+        <aside class="syllabus-sidebar">
+            <div style="margin-bottom:1.5rem">
+                <div style="font-size:.8rem;color:var(--text-muted);margin-bottom:.35rem">Course Completion</div>
+                <div id="course-progress-bar">
+                    <div class="progress-track"><div class="progress-bar" style="width:0%"></div></div>
+                </div>
+            </div>
+
+            <div id="syllabus-container">
+                <div class="spinner" style="margin:2rem auto"></div>
+            </div>
+        </aside>
+
+        <!-- Main Lesson Player/Reader -->
+        <main class="lesson-viewer">
+            <div id="alert-box"></div>
+
+            <div id="lesson-content-area">
+                <div class="spinner" style="margin:4rem auto"></div>
+            </div>
+        </main>
+    </div>
+
+    <script src="../js/app.js"></script>
+    <script>
+        if (!Auth.requireAuth('STUDENT')) throw new Error();
+        document.getElementById('user-name').textContent = '👤 ' + Auth.getUser().name;
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const courseId = parseInt(urlParams.get('courseId'), 10);
+
+        if (!courseId) {
+            location.href = 'my-courses.html';
+        }
+
+        let modules = [];
+        let allLessons = [];
+        let activeLesson = null;
+        let completedLessonIds = new Set();
+
+        async function init() {
+            try {
+                // Fetch course info, modules, lessons, student progress, and completed lesson IDs
+                const [course, mods, lessons, progress, completed] = await Promise.all([
+                    API.get('/api/courses/' + courseId),
+                    API.get(`/api/courses/${courseId}/modules`),
+                    API.get(`/api/courses/${courseId}/lessons`),
+                    API.get('/api/progress/me'),
+                    API.get(`/api/progress/completed?courseId=${courseId}`).catch(() => [])
+                ]);
+
+                document.getElementById('course-title-nav').textContent = course.title;
+                modules = mods;
+                allLessons = lessons;
+                completedLessonIds = new Set(Array.isArray(completed) ? completed : []);
+
+                const curProgress = progress.find(p => p.courseId === courseId);
+                if (curProgress) {
+                    updateProgressBar(curProgress.percentage);
+                }
+
+                renderSyllabus();
+
+                if (allLessons.length > 0) {
+                    selectLesson(allLessons[0].lessonId);
+                } else {
+                    document.getElementById('lesson-content-area').innerHTML =
+                        UI.emptyState('📖', 'No lessons available', 'This course does not have lessons published yet.');
+                }
+            } catch (err) {
+                UI.showAlert('alert-box', err.message || 'Failed to load course curriculum.');
+            }
+        }
+
+        function updateProgressBar(pct) {
+            document.getElementById('course-progress-bar').innerHTML = UI.progressBar(pct || 0);
+        }
+
+        function renderSyllabus() {
+            const container = document.getElementById('syllabus-container');
+            if (modules.length === 0) {
+                container.innerHTML = '<div class="text-xs text-muted" style="padding:1rem">No curriculum available</div>';
+                return;
+            }
+
+            container.innerHTML = modules.map(m => {
+                const modLessons = allLessons.filter(l => l.moduleId === m.moduleId);
+                return `
+                    <div style="margin-bottom:1rem">
+                        <div class="module-header">${m.title}</div>
+                        ${modLessons.map(l => {
+                            const isDone = completedLessonIds.has(l.lessonId);
+                            return `
+                            <div class="lesson-nav-item ${activeLesson && activeLesson.lessonId === l.lessonId ? 'active' : ''}"
+                                 id="nav-item-${l.lessonId}"
+                                 onclick="selectLesson(${l.lessonId})">
+                                <span style="display:flex;align-items:center;gap:.4rem">
+                                    ${isDone ? '<span style="color:#22c55e;font-weight:700">✓</span>' : '<span style="opacity:.6">📄</span>'}
+                                    <span>${l.title}</span>
+                                </span>
+                                <span class="text-xs" style="color:var(--text-muted)">${l.contentType || 'TEXT'}</span>
+                            </div>
+                        `;}).join('')}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function selectLesson(lessonId) {
+            const lesson = allLessons.find(l => l.lessonId === lessonId);
+            if (!lesson) return;
+            activeLesson = lesson;
+
+            // Update active state in syllabus
+            document.querySelectorAll('.lesson-nav-item').forEach(el => el.classList.remove('active'));
+            const el = document.getElementById('nav-item-' + lessonId);
+            if (el) el.classList.add('active');
+
+            const isDone = completedLessonIds.has(lesson.lessonId);
+
+            // Render lesson content
+            const contentArea = document.getElementById('lesson-content-area');
+            contentArea.innerHTML = `
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1.5rem">
+                    <div>
+                        <div class="badge badge-accent" style="margin-bottom:.5rem">${lesson.contentType || 'TEXT'} LESSON</div>
+                        <h2>${lesson.title}</h2>
+                    </div>
+                    <button class="btn ${isDone ? 'btn-secondary' : 'btn-success'}" id="btn-complete-${lesson.lessonId}"
+                            ${isDone ? 'disabled' : ''}
+                            onclick="markLessonComplete(${lesson.lessonId})">
+                        ${isDone ? '✓ Completed' : '✓ Mark as Completed'}
+                    </button>
+                </div>
+
+                <div class="content-box">
+                    ${lesson.content ? `<div style="white-space:pre-wrap;font-size:1.05rem;color:var(--text-primary)">${lesson.content}</div>` : '<p class="text-muted">No text content provided for this lesson.</p>'}
+                    ${lesson.contentUrl ? `
+                        <div style="margin-top:1.5rem;padding:1rem;background:rgba(255,255,255,0.03);border-radius:8px">
+                            <strong>Reference Resource:</strong> <a href="${lesson.contentUrl}" target="_blank" rel="noopener">${lesson.contentUrl} ↗</a>
+                        </div>
+                    ` : ''}
+                </div>
+
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2rem;padding-top:1.5rem;border-top:1px solid var(--glass-border)">
+                    <a href="assignments.html" class="btn btn-secondary">📝 View Assignments</a>
+                    <div>
+                        ${getAdjacentLessonButtons(lesson.lessonId)}
+                    </div>
+                </div>
+            `;
+        }
+
+        function getAdjacentLessonButtons(lessonId) {
+            const idx = allLessons.findIndex(l => l.lessonId === lessonId);
+            let prevBtn = idx > 0
+                ? `<button class="btn btn-secondary btn-sm" onclick="selectLesson(${allLessons[idx-1].lessonId})">← Previous</button>`
+                : '';
+            let nextBtn = idx < allLessons.length - 1
+                ? `<button class="btn btn-primary btn-sm" style="margin-left:.5rem" onclick="selectLesson(${allLessons[idx+1].lessonId})">Next →</button>`
+                : '';
+            return `${prevBtn}${nextBtn}`;
+        }
+
+        async function markLessonComplete(lessonId) {
+            const btn = document.getElementById(`btn-complete-${lessonId}`);
+            if (btn) UI.setButtonLoading(btn, true);
+
+            try {
+                const res = await API.post('/api/progress/complete', { lessonId: lessonId, courseId: courseId });
+                UI.toast('🎉 Lesson marked as complete!', 'success');
+                if (btn) {
+                    btn.innerHTML = '✓ Completed';
+                    btn.classList.replace('btn-success', 'btn-secondary');
+                    btn.disabled = true;
+                }
+                completedLessonIds.add(lessonId);
+                renderSyllabus();
+                if (res && res.percentage !== undefined) {
+                    updateProgressBar(res.percentage);
+                }
+            } catch (err) {
+                UI.toast(err.message || 'Could not update completion status', 'danger');
+                if (btn) UI.setButtonLoading(btn, false);
+            }
+        }
+
+        init();
+    </script>
+</body>
+</html>

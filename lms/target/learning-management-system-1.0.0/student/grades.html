@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My Grades – LearnHub LMS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../css/style.css" />
+</head>
+<body>
+    <nav class="navbar">
+        <a class="navbar-brand" href="../index.html"><div class="logo-icon">🎓</div> LearnHub LMS</a>
+        <ul class="navbar-nav">
+            <li><span id="user-name" style="color:var(--text-secondary);font-size:.875rem"></span></li>
+            <li><a class="nav-link" href="notifications.html">🔔 <span class="nav-badge hidden" id="notif-badge">0</span></a></li>
+            <li><button class="btn btn-secondary btn-sm" onclick="logout()">Logout</button></li>
+        </ul>
+    </nav>
+
+    <div class="app-layout">
+        <aside class="sidebar">
+            <div class="sidebar-section">
+                <div class="sidebar-label">Main</div>
+                <a class="sidebar-link" href="dashboard.html"><span class="icon">🏠</span> Dashboard</a>
+                <a class="sidebar-link" href="courses.html"><span class="icon">📚</span> Course Catalogue</a>
+                <a class="sidebar-link" href="my-courses.html"><span class="icon">🎒</span> My Courses</a>
+            </div>
+            <div class="sidebar-section">
+                <div class="sidebar-label">Learning</div>
+                <a class="sidebar-link" href="assignments.html"><span class="icon">📝</span> Assignments</a>
+                <a class="sidebar-link active" href="grades.html"><span class="icon">⭐</span> Grades</a>
+                <a class="sidebar-link" href="progress.html"><span class="icon">📊</span> My Progress</a>
+            </div>
+            <div class="sidebar-section">
+                <div class="sidebar-label">Account</div>
+                <a class="sidebar-link" href="notifications.html"><span class="icon">🔔</span> Notifications</a>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <div class="section-header">
+                <div>
+                    <h1 class="page-title">My Grades &amp; Feedback</h1>
+                    <p class="page-subtitle">Review graded submissions, scores, and instructor feedback.</p>
+                </div>
+            </div>
+
+            <div id="grades-summary" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;margin-bottom:2rem">
+                <div class="stat-card accent">
+                    <div class="stat-icon">📄</div>
+                    <div class="stat-value" id="stat-total-subs">—</div>
+                    <div class="stat-label">Total Submissions</div>
+                </div>
+                <div class="stat-card success">
+                    <div class="stat-icon">⭐</div>
+                    <div class="stat-value" id="stat-graded-subs">—</div>
+                    <div class="stat-label">Graded</div>
+                </div>
+                <div class="stat-card info">
+                    <div class="stat-icon">🎯</div>
+                    <div class="stat-value" id="stat-avg-score">—</div>
+                    <div class="stat-label">Average Score</div>
+                </div>
+            </div>
+
+            <div id="grades-table-container">
+                <div class="spinner" style="margin:3rem auto"></div>
+            </div>
+        </main>
+    </div>
+
+    <script src="../js/app.js"></script>
+    <script>
+        if (!Auth.requireAuth('STUDENT')) throw new Error();
+        document.getElementById('user-name').textContent = '👤 ' + Auth.getUser().name;
+
+        async function loadGrades() {
+            try {
+                const submissions = await API.get('/api/submissions/me');
+                const container = document.getElementById('grades-table-container');
+
+                if (submissions.length === 0) {
+                    container.innerHTML = UI.emptyState('⭐', 'No submissions yet', 'Submit your course assignments to see grades and feedback here.');
+                    document.getElementById('stat-total-subs').textContent = '0';
+                    document.getElementById('stat-graded-subs').textContent = '0';
+                    document.getElementById('stat-avg-score').textContent = '—';
+                    return;
+                }
+
+                const graded = submissions.filter(s => s.grade != null);
+                let avgScore = '—';
+                if (graded.length > 0) {
+                    const avg = graded.reduce((sum, s) => sum + (s.grade.score / s.maxMarks) * 100, 0) / graded.length;
+                    avgScore = avg.toFixed(1) + '%';
+                }
+
+                document.getElementById('stat-total-subs').textContent = submissions.length;
+                document.getElementById('stat-graded-subs').textContent = graded.length;
+                document.getElementById('stat-avg-score').textContent = avgScore;
+
+                container.innerHTML = `
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Assignment</th>
+                                    <th>Submitted File</th>
+                                    <th>Status</th>
+                                    <th>Score</th>
+                                    <th>Instructor Feedback</th>
+                                    <th>Submitted On</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${submissions.map(s => {
+                                    const g = s.grade;
+                                    const scoreBadge = g != null
+                                        ? `<span class="badge ${g.score / s.maxMarks >= 0.8 ? 'badge-success' : 'badge-accent'}" style="font-size:.85rem">
+                                            ${g.score} / ${s.maxMarks}
+                                           </span>`
+                                        : `<span class="badge badge-warning">Awaiting Grade</span>`;
+
+                                    return `
+                                        <tr>
+                                            <td style="color:var(--text-primary);font-weight:600">${s.assignmentTitle || 'Assignment'}</td>
+                                            <td>
+                                                <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+                                                    <span style="font-size:.85rem;color:var(--text-secondary)">📁 ${s.originalName || 'submission.pdf'}</span>
+                                                    <a href="/lms/api/submissions/${s.submissionId}/download" class="btn btn-secondary btn-sm" style="padding:.2rem .55rem;font-size:.75rem" download>⬇ Download</a>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                ${s.status === 'LATE'
+                                                    ? '<span class="badge badge-warning">Late</span>'
+                                                    : s.status === 'GRADED'
+                                                        ? '<span class="badge badge-success">Graded</span>'
+                                                        : '<span class="badge badge-accent">Submitted</span>'
+                                                }
+                                            </td>
+                                            <td>${scoreBadge}</td>
+                                            <td style="max-width:300px;font-size:.85rem;color:var(--text-secondary)">
+                                                ${g && g.feedback ? g.feedback : '<span class="text-muted">No comments yet</span>'}
+                                            </td>
+                                            <td class="text-xs text-muted">${UI.formatDateTime(s.submittedAt)}</td>
+                                        </tr>
+                                    `;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+            } catch (err) {
+                document.getElementById('grades-table-container').innerHTML =
+                    UI.emptyState('😕', 'Failed to load grades', err.message);
+            }
+        }
+
+        loadGrades();
+        loadNotificationCount();
+    </script>
+</body>
+</html>
